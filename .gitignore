@@ -1,0 +1,14 @@
+# IDE / Editor
+.idea/
+.vscode/
+
+# Claude Code
+.claude/
+
+# Ace-tool
+.ace-tool/
+
+# Temp files
+_test_*.ps1
+_diag*.ps1
+*.tmp
