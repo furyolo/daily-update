@@ -16,6 +16,9 @@ $script:DevTools = @(
     'ruby','perl','php','java','dotnet','deno','bun','zig','nim'
 )
 
+$script:UpgradeMaxRetries = 2
+$script:UpgradeRetryDelays = @(2, 5)
+
 $script:RE = @{
     Ansi       = '\x1b\[[0-9;]*m'
     Header     = '^\s*Name\s+Installed Version\s+Latest Version'
@@ -147,7 +150,7 @@ function Read-UserSelection([array]$list) {
         if ($input_ -eq '') { Write-Host "  请输入有效选择。" -ForegroundColor Yellow; continue }
         $low = $input_.ToLower()
 
-        if ($low -eq 'cancel') { return $null }
+        if ($low -in @('cancel','q','quit','exit','n','no')) { return $null }
         if ($low -eq 'all')    { return $list }
         if ($low -eq 'high')   { return @($list | Where-Object { $_.Type -eq 'Patch' }) }
         if ($low -eq 'dev')    { return @($list | Where-Object { $script:DevTools -contains $_.Name.ToLower() }) }
@@ -180,22 +183,46 @@ function Read-UserSelection([array]$list) {
 }
 
 function Invoke-ScoopUpgrade([array]$sel) {
-    $ok = 0; $fail = 0
+    $okFirst = 0
+    $okRetry = 0
+    $fail = 0
+    $maxAttempts = $script:UpgradeMaxRetries + 1
+
     foreach ($app in $sel) {
         Write-Host ("  更新 {0} ..." -f $app.Name) -ForegroundColor Cyan
-        $r = Invoke-ScoopCmd "scoop update $($app.Name)"
-        $exitCode = $r.ExitCode
-        if ($exitCode -eq 0) {
-            Write-Host ("  ✅ {0}" -f $app.Name) -ForegroundColor Green
-            $ok++
-        } else {
+        $attempt = 1
+        while ($attempt -le $maxAttempts) {
+            $r = Invoke-ScoopCmd "scoop update $($app.Name)"
+            $exitCode = $r.ExitCode
+
+            if ($exitCode -eq 0) {
+                Write-Host ("  ✅ {0}" -f $app.Name) -ForegroundColor Green
+                if ($attempt -eq 1) { $okFirst++ } else { $okRetry++ }
+                break
+            }
+
+            $text = ($r.Lines) -join "`n"
             $last = ($r.Lines | Select-Object -Last 1)
-            Write-Host ("  ❌ {0} - {1}" -f $app.Name, $last) -ForegroundColor Red
-            $fail++
+            if (-not $last) { $last = "退出码: $exitCode" }
+            $isPermErr = $text -match $script:RE.PermErr
+
+            if ($isPermErr -or $attempt -ge $maxAttempts) {
+                $reason = if ($isPermErr) { "权限错误，跳过重试" } else { "共尝试 $attempt 次" }
+                Write-Host ("  ❌ {0} - {1}（{2}）" -f $app.Name, $last, $reason) -ForegroundColor Red
+                $fail++
+                break
+            }
+
+            $delayIdx = if ($attempt - 1 -lt $script:UpgradeRetryDelays.Count) { $attempt - 1 } else { $script:UpgradeRetryDelays.Count - 1 }
+            $delay = $script:UpgradeRetryDelays[$delayIdx]
+            Write-Host ("  ⚠ {0} 失败，{1} 秒后重试（{2}/{3}）..." -f $app.Name, $delay, $attempt, $script:UpgradeMaxRetries) -ForegroundColor Yellow
+            Start-Sleep -Seconds $delay
+            $attempt++
         }
     }
+    $totalOk = $okFirst + $okRetry
     Write-Host ""
-    Write-Host ("  总计：{0} 成功，{1} 失败" -f $ok, $fail) -ForegroundColor Cyan
+    Write-Host ("  总计：{0} 成功（{1} 重试后成功），{2} 失败" -f $totalOk, $okRetry, $fail) -ForegroundColor Cyan
 }
 
 # === Main ===
