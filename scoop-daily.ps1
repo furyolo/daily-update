@@ -223,6 +223,7 @@ function Invoke-ScoopUpgrade([array]$sel) {
     $totalOk = $okFirst + $okRetry
     Write-Host ""
     Write-Host ("  总计：{0} 成功（{1} 重试后成功），{2} 失败" -f $totalOk, $okRetry, $fail) -ForegroundColor Cyan
+    return $totalOk
 }
 
 # === Main ===
@@ -261,7 +262,14 @@ function Main {
         return
     }
 
-    Invoke-ScoopUpgrade $sel
+    $okCount = Invoke-ScoopUpgrade $sel
+
+    if ($okCount -gt 0) {
+        Write-Host "`n  正在清理旧版本和缓存 ..." -ForegroundColor Cyan
+        Invoke-ScoopCmd "scoop cleanup *" | Out-Null
+        Invoke-ScoopCmd "scoop cache rm *" | Out-Null
+        Write-Host "  清理完成。" -ForegroundColor Green
+    }
 }
 
 Main
