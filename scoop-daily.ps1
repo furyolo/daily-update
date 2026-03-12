@@ -186,6 +186,7 @@ function Invoke-ScoopUpgrade([array]$sel) {
     $okFirst = 0
     $okRetry = 0
     $fail = 0
+    $skip = 0
     $maxAttempts = $script:UpgradeMaxRetries + 1
 
     foreach ($app in $sel) {
@@ -194,6 +195,14 @@ function Invoke-ScoopUpgrade([array]$sel) {
         while ($attempt -le $maxAttempts) {
             $r = Invoke-ScoopCmd "scoop update $($app.Name)"
             $exitCode = $r.ExitCode
+            $text = ($r.Lines) -join "`n"
+
+            # 检查是否因进程运行而跳过更新
+            if ($text -match '(?i)(Running process detected|skip updating)') {
+                Write-Host ("  ⏭ {0} - 进程正在运行，已跳过更新" -f $app.Name) -ForegroundColor Yellow
+                $skip++
+                break
+            }
 
             if ($exitCode -eq 0) {
                 Write-Host ("  ✅ {0}" -f $app.Name) -ForegroundColor Green
@@ -201,7 +210,6 @@ function Invoke-ScoopUpgrade([array]$sel) {
                 break
             }
 
-            $text = ($r.Lines) -join "`n"
             $last = ($r.Lines | Select-Object -Last 1)
             if (-not $last) { $last = "退出码: $exitCode" }
             $isPermErr = $text -match $script:RE.PermErr
@@ -222,7 +230,7 @@ function Invoke-ScoopUpgrade([array]$sel) {
     }
     $totalOk = $okFirst + $okRetry
     Write-Host ""
-    Write-Host ("  总计：{0} 成功（{1} 重试后成功），{2} 失败" -f $totalOk, $okRetry, $fail) -ForegroundColor Cyan
+    Write-Host ("  总计：{0} 成功（{1} 重试后成功），{2} 失败，{3} 跳过" -f $totalOk, $okRetry, $fail, $skip) -ForegroundColor Cyan
     return $totalOk
 }
 
